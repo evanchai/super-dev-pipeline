@@ -125,16 +125,17 @@ merge to main → production         auto-fix → retry (up to 3x) → fail? sto
 
 Production is never the testing environment. E2E must cover the specific changes made, not just generic smoke tests.
 
-### 8. Hooks — Self-Policing Checkpoints
+### 8. Self-Policing Checkpoints
 
-The pipeline runs **self-checks at every phase transition** — without being asked:
+At every phase transition, the pipeline runs a self-check against a violation table:
 
-- Phase complete → verify checklist → all pass? → next phase
-- Missing evidence? → block progression, not warn
-- Violation detected (skipped tests, no template output, stale dependency)? → stop and self-correct
-- User correction detected → auto-trigger P8 evolve before anything else
-
-These aren't reminders — they're automated gates that physically prevent skipping steps.
+| Violation | Detection | Action |
+|-----------|-----------|--------|
+| Skipped tests | Entered P5 without test output | Back to P4 |
+| Claimed done without evidence | No command output in bug fix template | Retract claim, run verification |
+| Pushed without E2E | Has Playwright but skipped release-flow | Run release-flow |
+| Used stale dependency | `import` without matching `package.json` entry | Stop and confirm tech stack |
+| User correction detected | Criticism/correction signal in message | Auto-trigger P8 evolve first |
 
 ### 9. Self-Evolution (P8) — Gets Stronger Over Time
 
@@ -257,16 +258,17 @@ merge main → 生产        自动修复 → 重试（最多 3 次）→ 还失
 
 生产环境永远不是测试环境。E2E 必须覆盖本次改动，不能只跑通用 smoke test。
 
-### 8. Hooks — 自我监督检查点
+### 8. 自我监督检查点
 
-每个阶段转换时自动执行自检 — 不需要提醒：
+每个阶段转换时对照违规表自检：
 
-- 阶段完成 → 核对检查清单 → 全过？→ 下一阶段
-- 缺证据？→ 阻止进入下一阶段，不是提醒
-- 检测到违规（跳测试、没输出模板、旧依赖）？→ 停下自我纠正
-- 检测到用户批评 → 先触发 P8 evolve，再做别的
-
-这不是建议 — 是自动化门禁，物理上阻止跳步。
+| 违规 | 检测 | 处理 |
+|------|------|------|
+| 跳测试 | 进 P5 但没有测试输出 | 回 P4 |
+| 没证据就说完成 | bug fix 模板缺段 | 撤回声明，跑验证 |
+| Push 没跑 E2E | 有 Playwright 但跳了 release-flow | 执行 release-flow |
+| 用了旧依赖 | import 的包不在 package.json 里 | 停下确认技术栈 |
+| 用户批评 | 检测到纠正信号 | 先触发 P8 evolve |
 
 ### 9. 自我进化（P8）— 越用越强
 
