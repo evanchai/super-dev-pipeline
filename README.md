@@ -1,174 +1,149 @@
 # Super Dev Pipeline
 
-A battle-tested 8-phase development pipeline skill for [Claude Code](https://claude.ai/code). Every rule exists because something broke in production.
+An end-to-end orchestration engine for [Claude Code](https://claude.ai/code) that turns one-shot prompts into production-grade software — with challenge loops, hard gates, and self-evolution.
 
 **[中文说明见下方](#中文说明)**
 
-## Why This Exists
+## The Problem
 
-Vibe coding with AI is fast. Too fast. You ship features in minutes, but also ship bugs in minutes. This pipeline adds the discipline that AI coding agents lack by default:
+Claude Code is incredibly capable at writing code. But shipping software is more than writing code — it's design → plan → build → verify → deploy → validate → learn. Without orchestration, the agent makes local decisions that look right but fail globally:
 
-- **You say "fix the share link"** → Claude fixes it, tests a GET, says "done" → share link still broken (tested the wrong thing)
-- **You say "add a feature"** → Claude adds it, breaks 3 existing features → no regression tests caught it
-- **You say "deploy"** → Claude pushes to main, skips E2E → users find the bugs for you
+- Fixes a bug but verifies with the wrong test
+- Builds a feature but breaks three existing ones
+- Deploys but doesn't check if production actually works
+- Makes the same mistake next session because it forgot
 
-**Super Dev Pipeline** prevents all of this with forced output templates, layered testing gates, and self-policing mechanisms.
+**Super Dev Pipeline** is the orchestration layer that connects all 8 phases into a single flow with feedback loops.
 
-## What Makes It Different
+## How It's Different
 
-| Feature | Most Pipeline Skills | Super Dev Pipeline |
-|---------|---------------------|-------------------|
-| Bug fix verification | "Tests pass" | Must reproduce user's exact scenario, fix, then re-verify with same operation |
-| Test strategy | Run all tests every time | **Layered**: related tests in P4, full regression in P5, E2E in P6 |
-| "Done" claims | Trust the agent | **Forced output template** with command output evidence |
-| Change classification | One-size-fits-all | **Small/Medium/Large** with different test depth per size |
-| Debugging | Read code → guess → fix | **Logs first** (Sentry → Vercel → Console → Supabase) → then code |
-| Rule enforcement | Guidelines doc (ignored) | **Hard gates** in the flow — can't progress without evidence |
-| Self-improvement | None | **P8 Evolve** — auto-reflects, updates rules, tracks patterns |
+### vs. [Superpowers](https://github.com/anthropics/superpowers)
+Superpowers provides **individual skill behaviors** — brainstorming, TDD, code review — each standalone. Super Dev Pipeline is the **conductor** that calls these skills in sequence, decides which to skip, and sends work backward when quality gates fail.
 
-## The Pipeline
+### vs. [GStack](https://github.com/garrytandev/gstack)
+GStack is **reactive** — it suggests the right skill at the right moment ("looks like you're debugging, try /investigate"). Super Dev Pipeline is **proactive** — it runs the full flow automatically without waiting for suggestions, and adapts the process weight to the task size.
+
+### vs. Standard Agentic Workflows
+Most workflows are linear: plan → code → test → deploy. Super Dev Pipeline has **challenge loops** — Phase 5 can reject Phase 4's work and send it back. Phase 7 can reject Phase 6's deployment. Phase 8 updates the pipeline itself. The system gets stronger over time.
 
 ```
-P1 Product Design ──→ P2 UI/UX ──→ P3 Implementation Plan
-        ↑                  |               ↑
-        └── not feasible ──┘               └── review blocker ──┐
-                                                                 ↓
-P8 Self-Evolution ←── P7 Production Verify ←── P6 Release ←── P5 Verify ←── P4 Coding
-        ↓                    ↑                     ↑               ↑            |
-   updates pipeline     re-walk user's         e2e fail →      full tests    related
-   for next time        failing operation      back to P4      (regression)   tests only
+                    ┌──── reject ────┐
+                    ↓                |
+P1 Design → P2 UI → P3 Plan → P4 Code → P5 Verify → P6 Ship → P7 Validate
+    ↑          |        ↑          ↑         |            ↑          |
+    └─ reject ─┘        └─ reject ─┘         └─ reject ──┘          ↓
+                                                                P8 Evolve
+                                                                    ↓
+                                                            updates pipeline
+                                                            for next session
 ```
 
-### Phase Details
+## Core Concepts
 
-| Phase | Goal | Key Action | Gate |
-|-------|------|-----------|------|
-| **P1** Product Design | Define what to build | User interviews, success criteria, YAGNI check | User approval per section |
-| **P2** UI/UX Design | Define how it looks | Style, layout, a11y. 2 skills: `baseline-ui` (constraints) + `frontend-design` (creative) | User approval |
-| **P3** Implementation Plan | Define how to build it | Step-by-step with exact file paths, code, and verification commands | Self-review for overengineering |
-| **P4** Coding | Build it | **Path A**: TDD (Red→Green→Refactor) / **Path B**: Bug fix (Reproduce→Logs→Root cause→Fix→Verify) | Forced output templates |
-| **P5** Verification | Can it ship? | Full test suite, build, security scan, design review | All checks green with evidence |
-| **P6** Release | Ship it | Push → Vercel deploy → E2E tests | E2E pass (auto-retry up to 3x) |
-| **P7** Production Verify | Is it alive? | Deployment check, Sentry, **bug fix: re-walk user's operation on prod** | Production evidence |
-| **P8** Self-Evolution | Learn from it | Reflect, update rules, scan for better skills | Auto-triggered |
+### 1. Smart Entry — Skip What You Don't Need
 
-### Smart Entry Points
+80% of tasks don't need 8 phases. The pipeline auto-detects:
 
-Not every task needs all 8 phases:
+| You say | Size | Starts at | What runs |
+|---------|------|-----------|-----------|
+| "Build a new app" | Large | P1 | All 8 phases |
+| "Add sharing feature" | Large | P1 | All 8 phases |
+| "Fix the login bug" | Medium | P4 | P4→P5→P6→P7→P8 |
+| "Change the button color" | Small | P4 fast lane | Build → push → verify |
 
-| Task | Size | Enters At | Example |
-|------|------|----------|---------|
-| New project | Large | P1 | "Build a new web app" |
-| New feature | Large | P1 | "Add sharing" |
-| UI redesign | Large | P2 | "Redesign the homepage" |
-| Bug fix | Medium | P4 | "Share link creation fails" |
-| Copy/color change | Small | P4 (fast lane) | "Change button color" |
+### 2. Challenge Loops — Downstream Rejects Upstream
+
+Every phase transition is a quality gate. If downstream finds a problem, work goes back to the right phase — not forward with a patch:
+
+- P2 finds P1's requirements don't make sense → **back to P1**
+- P4b code review finds a blocker → **back to P4a**
+- P5 tests fail → **back to P4**
+- P6 E2E fails → **back to P4** (auto-retry up to 3x)
+- P7 production broken → **rollback + back to P4**
+
+### 3. Forced Output Templates — No Shortcuts
+
+The agent must produce specific structured output at key points. Can't progress without it. This prevents "I fixed it (trust me)" situations.
+
+**Bug fix template (P4):**
+```markdown
+### User Report
+<what the user said, verbatim>
+### Reproduce
+<command + output showing the same error>
+### Root Cause
+<one sentence>
+### Fix
+<code changes>
+### Verify
+<same command, error gone>
+```
+
+**TDD template (P4):**
+```markdown
+### RED
+Test: <name>  |  Run: <command>  |  Result: FAIL (reason)
+### GREEN
+Change: <what>  |  Run: <command>  |  Result: PASS (count)
+```
+
+### 4. Layered Testing — Fast Where It Matters
+
+Instead of running all tests at every step (slow) or no tests (dangerous):
+
+```
+P4 Coding:       only related module tests     (seconds)
+P5 Verification: full test suite regression     (1-2 min)
+P6 Release:      E2E / Playwright              (2-5 min, background)
+```
+
+Small changes skip testing entirely — just build and push.
+
+### 5. Logs-First Debugging — Stop Guessing
+
+When fixing bugs, check production evidence before reading code:
+
+```
+Sentry errors → Vercel function logs → Browser console → Supabase logs
+    ↓ found the error? skip to hypothesis
+    ↓ nothing? fall back to code investigation
+```
+
+### 6. Self-Evolution (P8) — Gets Stronger Over Time
+
+After every significant task, the pipeline:
+- Reflects on what went wrong
+- Encodes new rules into memory
+- Searches for better skills online
+- Updates its own SKILL.md
+
+Rules that get violated repeatedly get **promoted** from memory files to CLAUDE.md (auto-loaded every session).
 
 ## The 6 Iron Rules
 
-These are **hard gates** — not guidelines, not suggestions. The pipeline physically cannot progress if they're violated.
+Hard gates — the pipeline cannot progress if any is violated.
 
-### Rule 1: Design First
-No code before user-approved design. Even for "simple" features.
+| # | Rule | What It Prevents |
+|---|------|-----------------|
+| 1 | **Design First** | Building the wrong thing |
+| 2 | **Tests First** | Untested code shipping (medium/large only) |
+| 3 | **Root Cause First** | Guess-and-patch debugging |
+| 3b | **Anchor to User** | Testing the wrong scenario |
+| 4 | **Evidence First** | "Trust me, it works" |
+| 5 | **Security First** | Leaked secrets in git |
 
-### Rule 2: Tests First (Medium/Large)
-No production code without a failing test first. Small changes (copy/color/spacing) exempt.
-
-### Rule 3: Root Cause First
-No fix proposals before finding root cause. "Let me try changing X" is forbidden.
-
-### Rule 3b: Anchor to User Scenario
-Reproduce and verify must match what the user reported. Can't get auth token? **Figure it out** — don't swap in an easier test.
-
-### Rule 4: Verify First
-No "done" claims without command output evidence. "Should be fine" is forbidden.
-
-### Rule 5: Security First
-`git diff --cached` checked for secrets before every commit.
-
-## Bug Fix Flow (The Hardest Part)
-
-This is where most AI agents fail — they fix something, test something else, and call it done. Super Dev Pipeline forces a strict sequence:
-
-```
-User reports bug
-    ↓
-Stage 1: REPRODUCE — exact user operation, see the same error
-    ↓ (can't reproduce? → ask user, don't guess)
-Stage 2: CHECK LOGS — Sentry → Vercel → Console → Supabase
-    ↓ (found error in logs? → jump to Stage 3)
-Stage 2b: CODE INVESTIGATION — git diff, trace data flow
-    ↓
-Stage 3: HYPOTHESIZE — single hypothesis, minimal test
-    ↓
-Stage 4: FIX + VERIFY — same operation as Stage 1, paste evidence
-```
-
-**Forced output (must be filled before P5):**
-
-```markdown
-### User Report
-"Share link creation fails on plat.ning.codes — click share → copy link → shows error"
-
-### Reproduce
-$ curl -X POST https://plat.ning.codes/api/share -H "Authorization: Bearer $TOKEN" -d '{"scanId":"xxx"}'
-→ HTTP 500: {"error": "Something went wrong"}
-
-### Root Cause
-SUPABASE_SERVICE_ROLE_KEY has trailing \n from `echo` pipe to `vercel env add`
-
-### Fix
-Added .trim() to env var reads in api/_supabase.ts
-
-### Verify
-$ curl -X POST https://plat.ning.codes/api/share -H "Authorization: Bearer $TOKEN" -d '{"scanId":"xxx"}'
-→ HTTP 200: {"shareId": "VeubJmUw"}
-```
-
-## Change Size Classification
-
-The agent cannot self-downgrade to skip tests:
-
-| Size | Definition | How to Identify |
-|------|-----------|----------------|
-| **Small** | Copy, color, spacing, config, typo. No logic touched. | Only non-logic parts of one file changed |
-| **Medium** | Single-module logic change or bug fix | Touches `api/*.ts`, auth, payment, or data model |
-| **Large** | Cross-module, new feature, API changes | Multiple components with shared dependencies |
-
-**Test depth per size:**
-
-```
-Small:   P4[none] → P5[build] → P6[none]
-Medium:  P4[related tests] → P5[FULL regression] → P6[E2E]
-Large:   P4[related tests] → P5[FULL regression] → P6[full release-flow]
-```
-
-## Installation
+## Quick Start
 
 ```bash
+# Install
 git clone https://github.com/evanchai/super-dev-pipeline.git ~/.claude/skills/super-dev-pipeline
+
+# Activate — add to your project's CLAUDE.md:
+echo '## Workflow
+All development tasks use `super-dev-pipeline` skill for orchestration.' >> CLAUDE.md
 ```
 
-Then add to your project's `CLAUDE.md`:
-
-```markdown
-## Workflow
-All development tasks use `super-dev-pipeline` skill for orchestration.
-```
-
-## Configuration
-
-The pipeline auto-detects project capabilities:
-
-```markdown
-# In your project CLAUDE.md, just list your commands:
-npm run test          # vitest
-npm run test:e2e      # playwright
-npm run lint          # eslint
-npm run build         # vite build
-```
-
-The pipeline reads these and adjusts — no Playwright? Skip E2E. No lint? Skip lint check. No tests at all? Flag it as a coverage gap.
+The pipeline auto-detects your project's capabilities from `package.json` and `CLAUDE.md`. No additional configuration needed.
 
 ## License
 
@@ -178,106 +153,83 @@ MIT
 
 # 中文说明
 
-## Super Dev Pipeline — Claude Code 全流程开发引擎
+## Super Dev Pipeline — Claude Code 全流程编排引擎
 
-一个经过实战检验的 8 阶段开发 Pipeline 技能。每条规则都源于真实生产事故 — 有伤疤才有规则。
+一个端到端的开发编排引擎 — 把一句话需求变成生产级软件，带挑战回路、硬门禁和自我进化。
 
-## 为什么需要这个
+## 解决什么问题
 
-AI Vibe Coding 很快，但也很容易翻车：
-- 你说"修分享链接" → Claude 修了代码，测了 GET，说"搞定" → 链接还是不能用（测错了）
-- 你说"加个功能" → Claude 加了，顺便搞坏了 3 个现有功能 → 没有回归测试
-- 你说"部署" → Claude 直接 push main，跳过 E2E → 用户替你测试
+Claude Code 写代码很强。但交付软件不只是写代码 — 是设计→计划→构建→验证→部署→确认→学习。没有编排层，agent 每一步都做局部最优，但全局翻车。
 
-**Super Dev Pipeline** 通过强制输出模板、分层测试门禁和自我监督机制防止这些问题。
+**Super Dev Pipeline** 就是这个编排层 — 把 8 个阶段串成一条流水线，带反馈回路。
 
-## 核心特色
+## 和其他工具的区别
 
-| 特性 | 普通 Pipeline | Super Dev Pipeline |
-|------|-------------|-------------------|
-| Bug 修复验证 | "测试通过" | 必须用**用户报告的操作**复现 → 修 → 同样操作验证 |
-| 测试策略 | 每次全跑 | **分层**：P4 相关模块、P5 全量回归、P6 E2E |
-| "完成"声明 | 信任 agent | **强制输出模板**，必须贴命令输出证据 |
-| 改动分级 | 一刀切 | **小/中/大**，不同规模不同测试深度 |
-| 调试流程 | 读代码 → 猜 → 改 | **先查日志**（Sentry → Vercel → Console → Supabase）→ 再看代码 |
-| 规则执行 | 指南文档（被忽略） | **流程硬门禁** — 没证据就不能进入下一阶段 |
-| 自我改进 | 无 | **P8 进化** — 自动反思，更新规则，追踪模式 |
+| 工具 | 定位 | Super Dev Pipeline 的区别 |
+|------|------|-------------------------|
+| **Superpowers** | 独立 skill 集合（brainstorm、TDD、code review 各自独立） | **指挥家** — 按顺序调用 skill，决定跳过哪个，质量不合格就打回 |
+| **GStack** | 被动建议（"看起来你在调试，试试 /investigate"） | **主动驱动** — 自动跑完整流程，根据任务规模调整流程权重 |
+| **普通 workflow** | 线性：计划→写→测→部署 | **挑战回路** — P5 可以打回 P4，P7 可以回滚 P6，P8 更新 pipeline 自身 |
 
-## 完整流程
+## 核心机制
+
+### 1. 智能入口 — 跳过不需要的阶段
+
+| 你说 | 规模 | 从哪开始 |
+|------|------|---------|
+| "做个新 app" | 大 | P1（全部 8 阶段） |
+| "修登录 bug" | 中 | P4（P4→P5→P6→P7→P8） |
+| "改个颜色" | 小 | P4 快车道（build→push→验证） |
+
+### 2. 挑战回路 — 下游打回上游
 
 ```
-P1 产品设计 ──→ P2 UI/UX ──→ P3 实现计划
-        ↑            |              ↑
-        └─ 技术不可行 ─┘              └── review blocker ──┐
-                                                           ↓
-P8 自我进化 ←── P7 上线验证 ←── P6 发布 ←── P5 验证检查 ←── P4 编码
-     ↓                ↑              ↑           ↑            |
- 更新 pipeline    重走用户操作     e2e 失败 →   全量回归      相关测试
-                                  回 P4
-
-### 各阶段详情
-
-| 阶段 | 目标 | 关键动作 | 门禁 |
-|------|------|---------|------|
-| **P1** 产品设计 | 定义做什么 | 用户访谈、成功标准、YAGNI | 用户逐段确认 |
-| **P2** UI/UX | 定义长什么样 | 风格、布局、无障碍。2 个 skill：约束 + 创意 | 用户确认 |
-| **P3** 实现计划 | 定义怎么做 | 精确到文件路径、代码、验证命令的步骤 | 自检过度设计 |
-| **P4** 编码 | 做出来 | TDD（Red→Green）或 Bug fix（复现→日志→根因→修→验证） | 强制输出模板 |
-| **P5** 验证 | 能发布吗？ | 全量测试、构建、安全扫描 | 全绿 + 证据 |
-| **P6** 发布 | 发出去 | Push → Vercel 部署 → E2E | E2E 通过（最多重试 3 次） |
-| **P7** 上线验证 | 活着吗？ | 部署确认、Sentry、**bug fix：在线上重走用户操作** | 生产环境证据 |
-| **P8** 进化 | 学到什么 | 反思、更新规则、搜索更强 skill | 自动触发 |
+P2 发现 P1 需求不合理 → 回 P1
+Code review 发现 blocker → 回 P4
+P5 测试失败 → 回 P4
+P6 E2E 失败 → 回 P4（最多 3 次）
+P7 生产挂了 → 回滚 + 回 P4
 ```
 
-### 智能入口
+### 3. 强制输出模板 — 不能省略
 
-不是每个任务都走全部 8 个阶段：
+Bug 修复必须输出五段式（用户报告/复现/根因/修复/验证），缺一段不能进入下一阶段。
 
-| 任务 | 规模 | 入口 | 示例 |
-|------|------|------|------|
-| 新项目 | 大 | P1 | "做一个新 app" |
-| 新功能 | 大 | P1 | "加分享功能" |
-| Bug 修复 | 中 | P4 | "分享链接失败" |
-| 改文案 | 小 | P4 快车道 | "改个按钮颜色" |
+TDD 必须输出 RED/GREEN 模板，每个循环都贴命令输出。
+
+### 4. 分层测试 — 该快的地方快
+
+```
+P4：相关模块测试（秒级）
+P5：全量回归（1-2 分钟）
+P6：E2E 端到端（2-5 分钟，后台跑）
+小改动：只跑 build，跳过测试
+```
+
+### 5. 日志优先调试 — 别猜
+
+```
+Sentry → Vercel 函数日志 → 浏览器 Console → Supabase 日志
+    ↓ 找到错误？跳到假设
+    ↓ 没有？再看代码
+```
+
+### 6. 自我进化（P8）— 越用越强
+
+每次重要任务后自动：反思 → 编码新规则 → 搜索更强 skill → 更新 pipeline 自身。
+
+反复违反的规则自动**升级**到 CLAUDE.md（每次会话自动加载）。
 
 ## 6 条铁律
 
-| # | 铁律 | 含义 |
-|---|------|------|
-| 1 | 设计先行 | 用户确认前不写代码 |
-| 2 | 测试先行 | 中/大改动必须先写失败测试（小改动豁免） |
-| 3 | 根因先行 | 找到根因前禁止提修复方案 |
-| 3b | 锚定用户场景 | 复现和验证必须匹配用户报告的操作 |
-| 4 | 验证先行 | 没有命令输出证据不能说"完成了" |
-| 5 | 安全先行 | commit 前必查密钥泄露 |
-
-## Bug 修复流程
-
-AI agent 最容易犯的错：修了一个东西，测了另一个东西，然后说"搞定了"。
-
-```
-用户报告 bug
-    ↓
-阶段 1：复现 — 用用户的操作，看到同样的错误
-    ↓（复现不了？问用户，不要猜）
-阶段 2：查日志 — Sentry → Vercel → Console → Supabase
-    ↓（日志有错误？直接跳到阶段 3）
-阶段 2b：代码排查 — git diff、追数据流
-    ↓
-阶段 3：假设 — 单一假设，最小测试
-    ↓
-阶段 4：修复 + 验证 — 用阶段 1 同样的操作，贴证据
-```
-
-## 改动规模分级
-
-不允许自己降级来跳过测试：
-
-```
-小：  P4[无] → P5[build] → P6[无]
-中：  P4[相关测试] → P5[全量回归] → P6[E2E]
-大：  P4[相关测试] → P5[全量回归] → P6[完整 release-flow]
-```
+| # | 铁律 | 防止什么 |
+|---|------|---------|
+| 1 | **设计先行** | 做错东西 |
+| 2 | **测试先行** | 未测试代码上线（中/大改动） |
+| 3 | **根因先行** | 猜测式修复 |
+| 3b | **锚定用户** | 测错场景 |
+| 4 | **证据先行** | "应该没问题" |
+| 5 | **安全先行** | 密钥泄露 |
 
 ## 安装
 
@@ -285,12 +237,14 @@ AI agent 最容易犯的错：修了一个东西，测了另一个东西，然�
 git clone https://github.com/evanchai/super-dev-pipeline.git ~/.claude/skills/super-dev-pipeline
 ```
 
-在项目的 `CLAUDE.md` 中添加：
+在项目 `CLAUDE.md` 中加一行：
 
 ```markdown
 ## Workflow
 所有开发任务使用 `super-dev-pipeline` skill 自动编排。
 ```
+
+自动检测项目能力，无需额外配置。
 
 ## License
 
