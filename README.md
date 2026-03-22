@@ -109,7 +109,34 @@ Sentry errors → Vercel function logs → Browser console → Supabase logs
     ↓ nothing? fall back to code investigation
 ```
 
-### 6. Self-Evolution (P8) — Gets Stronger Over Time
+### 6. Multi-Model Challenge — Cross-Validate with External Models
+
+When available, code review is cross-validated by a second model (e.g., Codex via MCP). Two models with different training biases catch what a single model self-reviewing its own code misses. Disagreements go through a structured debate protocol.
+
+### 7. Release Flow — Dev Branch → Preview → E2E → Production
+
+Never push directly to main and hope. The release flow enforces:
+
+```
+dev branch → push → Vercel Preview deployment → Playwright E2E against Preview
+    ↓ pass                              ↓ fail
+merge to main → production         auto-fix → retry (up to 3x) → fail? stop & report
+```
+
+Production is never the testing environment. E2E must cover the specific changes made, not just generic smoke tests.
+
+### 8. Hooks — Self-Policing Checkpoints
+
+The pipeline runs **self-checks at every phase transition** — without being asked:
+
+- Phase complete → verify checklist → all pass? → next phase
+- Missing evidence? → block progression, not warn
+- Violation detected (skipped tests, no template output, stale dependency)? → stop and self-correct
+- User correction detected → auto-trigger P8 evolve before anything else
+
+These aren't reminders — they're automated gates that physically prevent skipping steps.
+
+### 9. Self-Evolution (P8) — Gets Stronger Over Time
 
 After every significant task, the pipeline:
 - Reflects on what went wrong
@@ -214,7 +241,34 @@ Sentry → Vercel 函数日志 → 浏览器 Console → Supabase 日志
     ↓ 没有？再看代码
 ```
 
-### 6. 自我进化（P8）— 越用越强
+### 6. 多模型交叉审查 — 自己审自己有盲区
+
+可用时，code review 由第二个模型（如 Codex MCP）交叉验证。两个模型训练偏差不同，能抓住单模型自审漏掉的问题。
+
+### 7. Release Flow — dev 分支 → Preview → E2E → 生产
+
+绝不直接 push main 然后祈祷：
+
+```
+dev 分支 → push → Vercel Preview → Playwright E2E
+    ↓ 通过                    ↓ 失败
+merge main → 生产        自动修复 → 重试（最多 3 次）→ 还失败？停下汇报
+```
+
+生产环境永远不是测试环境。E2E 必须覆盖本次改动，不能只跑通用 smoke test。
+
+### 8. Hooks — 自我监督检查点
+
+每个阶段转换时自动执行自检 — 不需要提醒：
+
+- 阶段完成 → 核对检查清单 → 全过？→ 下一阶段
+- 缺证据？→ 阻止进入下一阶段，不是提醒
+- 检测到违规（跳测试、没输出模板、旧依赖）？→ 停下自我纠正
+- 检测到用户批评 → 先触发 P8 evolve，再做别的
+
+这不是建议 — 是自动化门禁，物理上阻止跳步。
+
+### 9. 自我进化（P8）— 越用越强
 
 每次重要任务后自动：反思 → 编码新规则 → 搜索更强 skill → 更新 pipeline 自身。
 
