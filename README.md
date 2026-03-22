@@ -170,22 +170,6 @@ npm run build         # vite build
 
 The pipeline reads these and adjusts — no Playwright? Skip E2E. No lint? Skip lint check. No tests at all? Flag it as a coverage gap.
 
-## Origin Story
-
-This pipeline was built from 20+ production incidents across 8 Vercel-deployed projects over 3 weeks of vibe coding:
-
-| Incident | What Broke | Rule Added |
-|----------|-----------|------------|
-| `vercel env add` via `echo` adds `\n` to values | 3 projects, all API calls failed | Env var `.trim()` + verify step |
-| Gemini model deprecated overnight | 5 API endpoints returned 500 | Dependency health checks |
-| "Fixed" share link, tested GET not POST | User still couldn't share | **Iron Rule 3b** — anchor to user scenario |
-| Said "done" without testing | User found the bug | **Forced output templates** |
-| Skipped E2E "because tests are slow" | Regression shipped to prod | **Change size classification** + layered testing |
-| Supabase key leaked via `env || "hardcoded"` pattern | API key disabled by Google | 5-layer defense system |
-| New feature broke existing payment flow | No regression tests for payment | Full regression required for medium/large |
-
-**Every rule has a scar behind it.**
-
 ## License
 
 MIT
@@ -307,18 +291,6 @@ git clone https://github.com/evanchai/super-dev-pipeline.git ~/.claude/skills/su
 ## Workflow
 所有开发任务使用 `super-dev-pipeline` skill 自动编排。
 ```
-
-## 起源
-
-| 事故 | 坏了什么 | 加了什么规则 |
-|------|---------|------------|
-| `vercel env add` 用 `echo` 导致值末尾 `\n` | 3 个项目 API 全挂 | env var `.trim()` + 验证步骤 |
-| Gemini 模型一夜过期 | 5 个 API 返回 500 | 依赖健康检查 |
-| "修了"分享链接，测的是 GET 不是 POST | 用户还是不能分享 | **铁律 3b** — 锚定用户场景 |
-| 没测试就说"完成了" | 用户踩坑 | **强制输出模板** |
-| "测试太慢"跳过 E2E | 回归 bug 上线 | **改动分级** + 分层测试 |
-
-**每条规则背后都有一个伤疤。**
 
 ## License
 
