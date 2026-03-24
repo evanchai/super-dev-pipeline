@@ -1,306 +1,109 @@
 # Super Dev Pipeline
 
-An end-to-end orchestration engine for [Claude Code](https://claude.ai/code) that turns one-shot prompts into production-grade software — with challenge loops, hard gates, and self-evolution.
+Dual-agent development pipeline for Claude Code.
 
-**[中文说明见下方](#中文说明)**
+- Claude Code owns `P1-P5`: product design, UI/UX, implementation planning, coding, and verification.
+- Codex owns `P4b`, `P6`, `P7`: independent code review, release, and production verification.
+- Long instructions are split into stage-specific references so the main skill stays lean enough to follow reliably.
 
-## The Problem
+## What It Solves
 
-Claude Code is incredibly capable at writing code. But shipping software is more than writing code — it's design → plan → build → verify → deploy → validate → learn. Without orchestration, the agent makes local decisions that look right but fail globally:
+Claude Code is good at writing code, but shipping software needs more than one linear pass. This skill adds:
 
-- Fixes a bug but verifies with the wrong test
-- Builds a feature but breaks three existing ones
-- Deploys but doesn't check if production actually works
-- Makes the same mistake next session because it forgot
+- smart entry routing
+- concrete quality gates between phases
+- automatic sidecars for discovery, safety, debugging, review, and release
+- a release handoff between Claude and Codex
+- a lean prompt footprint instead of a single giant `SKILL.md`
 
-**Super Dev Pipeline** is the orchestration layer that connects all 8 phases into a single flow with feedback loops.
+## Phase Map
 
-## How It's Different
+| Phase | Owner | Purpose |
+|------|-------|---------|
+| `P1` | Claude | Product design, scope, success criteria |
+| `P2` | Claude | UI/UX design |
+| `P3` | Claude | Implementation plan |
+| `P4a` | Claude | Coding via TDD or structured debugging |
+| `P4b` | Codex | Independent code review gate |
+| `P5` | Claude | Verification and `Release Handoff` |
+| `P6` | Codex | Release |
+| `P7` | Codex | Production verification |
+| `P8` | Claude | Evolve the workflow |
 
-### vs. [Superpowers](https://github.com/anthropics/superpowers)
-Superpowers provides **individual skill behaviors** — brainstorming, TDD, code review — each standalone. Super Dev Pipeline is the **conductor** that calls these skills in sequence, decides which to skip, and sends work backward when quality gates fail.
+## Repo Layout
 
-### vs. [GStack](https://github.com/garrytandev/gstack)
-GStack is **reactive** — it suggests the right skill at the right moment ("looks like you're debugging, try /investigate"). Super Dev Pipeline is **proactive** — it runs the full flow automatically without waiting for suggestions, and adapts the process weight to the task size.
-
-### vs. Standard Agentic Workflows
-Most workflows are linear: plan → code → test → deploy. Super Dev Pipeline has **challenge loops** — Phase 5 can reject Phase 4's work and send it back. Phase 7 can reject Phase 6's deployment. Phase 8 updates the pipeline itself. The system gets stronger over time.
-
-```
-                    ┌──── reject ────┐
-                    ↓                |
-P1 Design → P2 UI → P3 Plan → P4 Code → P5 Verify → P6 Ship → P7 Validate
-    ↑          |        ↑          ↑         |            ↑          |
-    └─ reject ─┘        └─ reject ─┘         └─ reject ──┘          ↓
-                                                                P8 Evolve
-                                                                    ↓
-                                                            updates pipeline
-                                                            for next session
-```
-
-## Core Concepts
-
-### 1. Smart Entry — Skip What You Don't Need
-
-80% of tasks don't need 8 phases. The pipeline auto-detects:
-
-| You say | Size | Starts at | What runs |
-|---------|------|-----------|-----------|
-| "Build a new app" | Large | P1 | All 8 phases |
-| "Add sharing feature" | Large | P1 | All 8 phases |
-| "Fix the login bug" | Medium | P4 | P4→P5→P6→P7→P8 |
-| "Change the button color" | Small | P4 fast lane | Build → push → verify |
-
-### 2. Challenge Loops — Downstream Rejects Upstream
-
-Every phase transition is a quality gate. If downstream finds a problem, work goes back to the right phase — not forward with a patch:
-
-- P2 finds P1's requirements don't make sense → **back to P1**
-- P4b code review finds a blocker → **back to P4a**
-- P5 tests fail → **back to P4**
-- P6 E2E fails → **back to P4** (auto-retry up to 3x)
-- P7 production broken → **rollback + back to P4**
-
-### 3. Forced Output Templates — No Shortcuts
-
-The agent must produce specific structured output at key points. Can't progress without it. This prevents "I fixed it (trust me)" situations.
-
-**Bug fix template (P4):**
-```markdown
-### User Report
-<what the user said, verbatim>
-### Reproduce
-<command + output showing the same error>
-### Root Cause
-<one sentence>
-### Fix
-<code changes>
-### Verify
-<same command, error gone>
+```text
+SKILL.md
+references/
+  TDD.md
+  DEBUG.md
+  RELEASE.md
+  STATE.md
+tests/
+  super-dev-pipeline.test.ts
+package.json
 ```
 
-**TDD template (P4):**
-```markdown
-### RED
-Test: <name>  |  Run: <command>  |  Result: FAIL (reason)
-### GREEN
-Change: <what>  |  Run: <command>  |  Result: PASS (count)
-```
-
-### 4. Layered Testing — Fast Where It Matters
-
-Instead of running all tests at every step (slow) or no tests (dangerous):
-
-```
-P4 Coding:       only related module tests     (seconds)
-P5 Verification: full test suite regression     (1-2 min)
-P6 Release:      E2E / Playwright              (2-5 min, background)
-```
-
-Small changes skip testing entirely — just build and push.
-
-### 5. Logs-First Debugging — Stop Guessing
-
-When fixing bugs, check production evidence before reading code:
-
-```
-Sentry errors → Vercel function logs → Browser console → Supabase logs
-    ↓ found the error? skip to hypothesis
-    ↓ nothing? fall back to code investigation
-```
-
-### 6. Multi-Model Challenge — Cross-Validate with External Models
-
-When available, code review is cross-validated by a second model (e.g., Codex via MCP). Two models with different training biases catch what a single model self-reviewing its own code misses. Disagreements go through a structured debate protocol.
-
-### 7. Release Flow — Dev Branch → Preview → E2E → Production
-
-Never push directly to main and hope. The release flow enforces:
-
-```
-dev branch → push → Vercel Preview deployment → Playwright E2E against Preview
-    ↓ pass                              ↓ fail
-merge to main → production         auto-fix → retry (up to 3x) → fail? stop & report
-```
-
-Production is never the testing environment. E2E must cover the specific changes made, not just generic smoke tests.
-
-### 8. Self-Policing Checkpoints
-
-At every phase transition, the pipeline runs a self-check against a violation table:
-
-| Violation | Detection | Action |
-|-----------|-----------|--------|
-| Skipped tests | Entered P5 without test output | Back to P4 |
-| Claimed done without evidence | No command output in bug fix template | Retract claim, run verification |
-| Pushed without E2E | Has Playwright but skipped release-flow | Run release-flow |
-| Used stale dependency | `import` without matching `package.json` entry | Stop and confirm tech stack |
-| User correction detected | Criticism/correction signal in message | Auto-trigger P8 evolve first |
-
-### 9. Self-Evolution (P8) — Gets Stronger Over Time
-
-After every significant task, the pipeline:
-- Reflects on what went wrong
-- Encodes new rules into memory
-- Searches for better skills online
-- Updates its own SKILL.md
-
-Rules that get violated repeatedly get **promoted** from memory files to CLAUDE.md (auto-loaded every session).
-
-## The 6 Iron Rules
-
-Hard gates — the pipeline cannot progress if any is violated.
-
-| # | Rule | What It Prevents |
-|---|------|-----------------|
-| 1 | **Design First** | Building the wrong thing |
-| 2 | **Tests First** | Untested code shipping (medium/large only) |
-| 3 | **Root Cause First** | Guess-and-patch debugging |
-| 3b | **Anchor to User** | Testing the wrong scenario |
-| 4 | **Evidence First** | "Trust me, it works" |
-| 5 | **Security First** | Leaked secrets in git |
-
-## Quick Start
-
-```bash
-# Install
-git clone https://github.com/evanchai/super-dev-pipeline.git ~/.claude/skills/super-dev-pipeline
-
-# Activate — add to your project's CLAUDE.md:
-echo '## Workflow
-All development tasks use `super-dev-pipeline` skill for orchestration.' >> CLAUDE.md
-```
-
-The pipeline auto-detects your project's capabilities from `package.json` and `CLAUDE.md`. No additional configuration needed.
-
-## License
-
-MIT
-
----
-
-# 中文说明
-
-## Super Dev Pipeline — Claude Code 全流程编排引擎
-
-一个端到端的开发编排引擎 — 把一句话需求变成生产级软件，带挑战回路、硬门禁和自我进化。
-
-## 解决什么问题
-
-Claude Code 写代码很强。但交付软件不只是写代码 — 是设计→计划→构建→验证→部署→确认→学习。没有编排层，agent 每一步都做局部最优，但全局翻车。
-
-**Super Dev Pipeline** 就是这个编排层 — 把 8 个阶段串成一条流水线，带反馈回路。
-
-## 和其他工具的区别
-
-| 工具 | 定位 | Super Dev Pipeline 的区别 |
-|------|------|-------------------------|
-| **Superpowers** | 独立 skill 集合（brainstorm、TDD、code review 各自独立） | **指挥家** — 按顺序调用 skill，决定跳过哪个，质量不合格就打回 |
-| **GStack** | 被动建议（"看起来你在调试，试试 /investigate"） | **主动驱动** — 自动跑完整流程，根据任务规模调整流程权重 |
-| **普通 workflow** | 线性：计划→写→测→部署 | **挑战回路** — P5 可以打回 P4，P7 可以回滚 P6，P8 更新 pipeline 自身 |
-
-## 核心机制
-
-### 1. 智能入口 — 跳过不需要的阶段
-
-| 你说 | 规模 | 从哪开始 |
-|------|------|---------|
-| "做个新 app" | 大 | P1（全部 8 阶段） |
-| "修登录 bug" | 中 | P4（P4→P5→P6→P7→P8） |
-| "改个颜色" | 小 | P4 快车道（build→push→验证） |
-
-### 2. 挑战回路 — 下游打回上游
-
-```
-P2 发现 P1 需求不合理 → 回 P1
-Code review 发现 blocker → 回 P4
-P5 测试失败 → 回 P4
-P6 E2E 失败 → 回 P4（最多 3 次）
-P7 生产挂了 → 回滚 + 回 P4
-```
-
-### 3. 强制输出模板 — 不能省略
-
-Bug 修复必须输出五段式（用户报告/复现/根因/修复/验证），缺一段不能进入下一阶段。
-
-TDD 必须输出 RED/GREEN 模板，每个循环都贴命令输出。
-
-### 4. 分层测试 — 该快的地方快
-
-```
-P4：相关模块测试（秒级）
-P5：全量回归（1-2 分钟）
-P6：E2E 端到端（2-5 分钟，后台跑）
-小改动：只跑 build，跳过测试
-```
-
-### 5. 日志优先调试 — 别猜
-
-```
-Sentry → Vercel 函数日志 → 浏览器 Console → Supabase 日志
-    ↓ 找到错误？跳到假设
-    ↓ 没有？再看代码
-```
-
-### 6. 多模型交叉审查 — 自己审自己有盲区
-
-可用时，code review 由第二个模型（如 Codex MCP）交叉验证。两个模型训练偏差不同，能抓住单模型自审漏掉的问题。
-
-### 7. Release Flow — dev 分支 → Preview → E2E → 生产
-
-绝不直接 push main 然后祈祷：
-
-```
-dev 分支 → push → Vercel Preview → Playwright E2E
-    ↓ 通过                    ↓ 失败
-merge main → 生产        自动修复 → 重试（最多 3 次）→ 还失败？停下汇报
-```
-
-生产环境永远不是测试环境。E2E 必须覆盖本次改动，不能只跑通用 smoke test。
-
-### 8. 自我监督检查点
-
-每个阶段转换时对照违规表自检：
-
-| 违规 | 检测 | 处理 |
-|------|------|------|
-| 跳测试 | 进 P5 但没有测试输出 | 回 P4 |
-| 没证据就说完成 | bug fix 模板缺段 | 撤回声明，跑验证 |
-| Push 没跑 E2E | 有 Playwright 但跳了 release-flow | 执行 release-flow |
-| 用了旧依赖 | import 的包不在 package.json 里 | 停下确认技术栈 |
-| 用户批评 | 检测到纠正信号 | 先触发 P8 evolve |
-
-### 9. 自我进化（P8）— 越用越强
-
-每次重要任务后自动：反思 → 编码新规则 → 搜索更强 skill → 更新 pipeline 自身。
-
-反复违反的规则自动**升级**到 CLAUDE.md（每次会话自动加载）。
-
-## 6 条铁律
-
-| # | 铁律 | 防止什么 |
-|---|------|---------|
-| 1 | **设计先行** | 做错东西 |
-| 2 | **测试先行** | 未测试代码上线（中/大改动） |
-| 3 | **根因先行** | 猜测式修复 |
-| 3b | **锚定用户** | 测错场景 |
-| 4 | **证据先行** | "应该没问题" |
-| 5 | **安全先行** | 密钥泄露 |
-
-## 安装
+- `SKILL.md`: routing, phase ownership, gates, downgrade rules
+- `references/TDD.md`: P4a path for new features, refactors, and medium/large tested changes
+- `references/DEBUG.md`: P4a path for bug fixing and root-cause work
+- `references/RELEASE.md`: P5-P7 release handoff, deployment, and production verification
+- `references/STATE.md`: state persistence, batch mode, hook/state rules
+- `tests/`: harness that protects the structure and routing contracts
+
+## Auto Sidecars
+
+The skill references concrete helpers instead of vague abstractions:
+
+- `/office-hours` for high-ambiguity product discovery
+- `/freeze` for edit scoping during bug fixes
+- `/careful` for destructive commands and production work
+- `/investigate` for structured debugging
+- `/codex review` for independent review gates
+- `/codex release` for release and production verification
+
+Small low-risk changes can still skip review or release gates when repo policy explicitly allows `skipped by policy`.
+
+## Install
 
 ```bash
 git clone https://github.com/evanchai/super-dev-pipeline.git ~/.claude/skills/super-dev-pipeline
 ```
 
-在项目 `CLAUDE.md` 中加一行：
+Add this to your project `CLAUDE.md`:
 
-```markdown
+```md
 ## Workflow
-所有开发任务使用 `super-dev-pipeline` skill 自动编排。
+
+All development tasks default to `super-dev-pipeline`.
 ```
 
-自动检测项目能力，无需额外配置。
+## Validate
+
+```bash
+cd ~/.claude/skills/super-dev-pipeline
+bun test tests/
+```
+
+The harness checks:
+
+- main skill stays lean
+- references stay focused
+- phase routing stays stable
+- concrete sidecar bindings remain present
+- old raw Codex CLI patterns and stale names do not return
+
+## 中文
+
+这是一个给 Claude Code 用的双代理开发流水线：
+
+- Claude 负责 `P1-P5`
+- Codex 负责 `P4b/P6/P7`
+- 主文件只保留流程骨架
+- 详细说明拆到 `references/`
+- 仓库自带 Bun harness，避免 skill 改着改着回退到旧逻辑
+
+适合想把需求、设计、实现、验证、发布串成一条稳定流程的人。
 
 ## License
 

@@ -1,0 +1,8 @@
+{
+  "name": "super-dev-pipeline-harness",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test tests/"
+  }
+}
